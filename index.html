@@ -240,6 +240,66 @@
   .wifi-icon { color: var(--accent3); }
   .wifi-icon.off { color: var(--danger); }
 
+  /* History chart card */
+  .chart-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    margin: 0 28px 20px;
+    max-width: 1600px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .chart-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #00d4ff, #ff6b35, #39ff8a, #b06cff);
+  }
+  .chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .chart-title {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--dim);
+    font-family: var(--mono);
+  }
+  .chart-name {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+  .chart-legend {
+    display: flex;
+    gap: 16px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--dim);
+    flex-wrap: wrap;
+  }
+  .legend-dot {
+    display: inline-block;
+    width: 8px; height: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+    border-radius: 1px;
+  }
+  canvas.mainchart { width: 100%; height: 220px; display: block; }
+  .chart-card .loading-text { padding: 60px 0; text-align: center; }
+
   footer {
     padding: 10px 28px;
     border-top: 1px solid var(--border);
@@ -280,15 +340,28 @@
 
 <!-- Shown until account key is entered -->
 <div class="setup-banner" id="setupBanner">
-  ⚠ ACCOUNT KEY NOT SET — Enter your UbiBot Account Key below (Console → Account → Security). It's stored only in your browser's memory for this session; it is never sent anywhere except UbiBot's API, and is not saved to disk.
+  ⚠ ACCOUNT KEY NOT SET — Enter your UbiBot Account Key below (Console → Account → Security). It's saved only in this browser's local storage on this device — never sent anywhere except UbiBot's API, and never included in the page's code or GitHub repo.
   <div class="config-row">
     <input type="password" id="accountKeyInput" placeholder="Paste your UbiBot Account Key here">
-    <button onclick="setAccountKey()">CONNECT</button>
+    <button onclick="setAccountKey()">CONNECT &amp; REMEMBER</button>
+    <button onclick="forgetAccountKey()" style="background:#2a2f3a; color:var(--text);">FORGET KEY</button>
   </div>
 </div>
 
 <div class="grid" id="zoneGrid">
   <!-- Cards injected by JS -->
+</div>
+
+<div class="chart-card">
+  <div class="chart-header">
+    <div>
+      <div class="chart-title">24-Hour History</div>
+      <div class="chart-name">Temperature Overview — All Zones</div>
+    </div>
+    <div class="chart-legend" id="chartLegend"></div>
+  </div>
+  <canvas class="mainchart" id="mainChart"></canvas>
+  <div class="loading-text" id="chartLoading" style="display:none;">Loading 24-hour history...</div>
 </div>
 
 <footer>
@@ -302,10 +375,10 @@
    CONFIG — your 4 zones, mapped to their UbiBot Channel IDs
    ============================================================ */
 const ZONES = [
-  { channelId: '131932', name: 'Plasma Table',     accent: '#39ff8a' },
-  { channelId: '131934', name: 'West Long Stall',      accent: '#00d4ff' },
-  { channelId: '131937', name: 'East Stall',   accent: '#ff6b35' },
-  { channelId: '131938', name: 'Front Office',        accent: '#b06cff' },
+  { channelId: '131932', name: 'Plasma Table',      accent: '#39ff8a' },
+  { channelId: '131934', name: 'West Long Stall',   accent: '#00d4ff' },
+  { channelId: '131937', name: 'Front Office',      accent: '#ff6b35' },
+  { channelId: '131938', name: 'East Stall',        accent: '#b06cff' },
 ];
 
 const REFRESH_MS = 60000; // 60 seconds — matches UbiBot's typical reporting interval
@@ -313,16 +386,42 @@ const STALE_MINUTES = 15; // flag a sensor as stale if no update in this many mi
 
 let accountKey = '';
 let pollTimer = null;
+const STORAGE_KEY = 'ubibot_account_key';
 
 /* ============================================================
-   Account key handling — kept in memory only, never persisted
+   Account key handling — persisted in this browser's localStorage
+   only. Never written into the page's source, never committed to
+   the repo, never sent anywhere except UbiBot's own API endpoint.
    ============================================================ */
 function setAccountKey() {
   const val = document.getElementById('accountKeyInput').value.trim();
   if (!val) return;
   accountKey = val;
+  try {
+    localStorage.setItem(STORAGE_KEY, val);
+  } catch (e) {
+    console.warn('Could not persist key to localStorage:', e);
+  }
   document.getElementById('setupBanner').classList.remove('show');
   startPolling();
+}
+
+function forgetAccountKey() {
+  accountKey = '';
+  try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  document.getElementById('accountKeyInput').value = '';
+  if (pollTimer) clearInterval(pollTimer);
+  document.getElementById('setupBanner').classList.add('show');
+  document.getElementById('liveStatusText').textContent = 'KEY CLEARED';
+}
+
+function loadStoredKey() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) accountKey = stored;
+  } catch (e) {
+    console.warn('Could not read localStorage:', e);
+  }
 }
 
 function checkKeyNeeded() {
@@ -493,7 +592,164 @@ function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollAll();
   pollTimer = setInterval(pollAll, REFRESH_MS);
+  fetchHistoryAndDraw();
+  if (historyTimer) clearInterval(historyTimer);
+  historyTimer = setInterval(fetchHistoryAndDraw, HISTORY_REFRESH_MS);
 }
+
+/* ============================================================
+   24-hour history chart
+   ============================================================ */
+let historyTimer = null;
+let lastHistoryData = null;
+const HISTORY_REFRESH_MS = 5 * 60000; // refresh history every 5 minutes — hourly data doesn't need 60s polling
+
+function buildChartLegend() {
+  const legend = document.getElementById('chartLegend');
+  legend.innerHTML = ZONES.map(z =>
+    `<span><span class="legend-dot" style="background:${z.accent};"></span>${z.name}</span>`
+  ).join('');
+}
+
+async function fetchChannelHistory(zone) {
+  // Hourly summary endpoint — returns averaged readings, ideal for a 24hr line chart
+  const end = new Date();
+  const start = new Date(end.getTime() - 25 * 3600000); // pad 1 extra hour to ensure full 24hr coverage
+  const fmt = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
+  const url = `https://webapi.ubibot.com/channels/${zone.channelId}/summary.json?account_key=${encodeURIComponent(accountKey)}&start=${encodeURIComponent(fmt(start))}&end=${encodeURIComponent(fmt(end))}&results=30`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data.result !== 'success' || !data.results_set) return { zone, points: [] };
+
+    // field1 = temperature (Celsius natively, convert to F)
+    const points = data.results_set
+      .filter(r => r.field1 && r.field1.avg != null)
+      .map(r => ({
+        t: new Date(r.created_at),
+        v: r.field1.avg * 9 / 5 + 32
+      }));
+    return { zone, points };
+  } catch (err) {
+    console.error('History fetch failed for', zone.channelId, err);
+    return { zone, points: [] };
+  }
+}
+
+async function fetchHistoryAndDraw() {
+  if (!accountKey) return;
+  const loadingEl = document.getElementById('chartLoading');
+  const canvas = document.getElementById('mainChart');
+  loadingEl.style.display = 'block';
+  canvas.style.display = 'none';
+
+  const allResults = await Promise.all(ZONES.map(fetchChannelHistory));
+  lastHistoryData = allResults;
+
+  loadingEl.style.display = 'none';
+  canvas.style.display = 'block';
+  drawMainChart(allResults);
+}
+
+function drawMainChart(datasets) {
+  const canvas = document.getElementById('mainChart');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const h = 220;
+  canvas.width = rect.width * dpr;
+  canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, rect.width, h);
+
+  const w = rect.width;
+  const padL = 38, padR = 12, padT = 10, padB = 26;
+  const cw = w - padL - padR, ch = h - padT - padB;
+
+  const allPoints = datasets.flatMap(d => d.points);
+  if (allPoints.length === 0) {
+    ctx.fillStyle = '#4a5a6a';
+    ctx.font = "13px 'Share Tech Mono'";
+    ctx.textAlign = 'center';
+    ctx.fillText('No history data available yet', w / 2, h / 2);
+    return;
+  }
+
+  const vals = allPoints.map(p => p.v);
+  const min = Math.min(...vals) - 3;
+  const max = Math.max(...vals) + 3;
+
+  const now = Date.now();
+  const windowStart = now - 24 * 3600000;
+  const xPos = (t) => padL + ((t - windowStart) / (24 * 3600000)) * cw;
+  const yPos = (v) => padT + (1 - (v - min) / (max - min)) * ch;
+
+  // Grid lines + temp labels
+  ctx.strokeStyle = '#1e2530';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (i / 4) * ch;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(w - padR, y);
+    ctx.stroke();
+    const val = Math.round(max - (i / 4) * (max - min));
+    ctx.fillStyle = '#4a5a6a';
+    ctx.font = "9px 'Share Tech Mono'";
+    ctx.textAlign = 'right';
+    ctx.fillText(val + '°', padL - 4, y + 3);
+  }
+
+  // Hour labels along x-axis
+  ctx.fillStyle = '#4a5a6a';
+  ctx.textAlign = 'center';
+  ctx.font = "9px 'Share Tech Mono'";
+  for (let i = 0; i <= 12; i++) {
+    const t = windowStart + (i / 12) * 24 * 3600000;
+    const x = padL + (i / 12) * cw;
+    const d = new Date(t);
+    const label = i === 12 ? 'NOW' : d.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+    ctx.fillText(label, x, h - 6);
+  }
+
+  // Draw each zone's line
+  datasets.forEach(({ zone, points }) => {
+    if (points.length === 0) return;
+    const sorted = [...points].sort((a, b) => a.t - b.t);
+    ctx.beginPath();
+    let started = false;
+    sorted.forEach(p => {
+      const x = xPos(p.t.getTime());
+      const y = yPos(p.v);
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = zone.accent;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = zone.accent;
+    ctx.shadowBlur = 8;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Dot on last point
+    const last = sorted[sorted.length - 1];
+    const lx = xPos(last.t.getTime());
+    const ly = yPos(last.v);
+    ctx.beginPath();
+    ctx.arc(lx, ly, 3, 0, Math.PI * 2);
+    ctx.fillStyle = zone.accent;
+    ctx.shadowColor = zone.accent;
+    ctx.shadowBlur = 10;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+}
+
+window.addEventListener('resize', () => {
+  if (lastHistoryData) drawMainChart(lastHistoryData);
+});
 
 /* ============================================================
    Clock
@@ -509,7 +765,13 @@ setInterval(updateClock, 1000);
    Init
    ============================================================ */
 buildCards();
-checkKeyNeeded();
+buildChartLegend();
+loadStoredKey();
+if (accountKey) {
+  startPolling();
+} else {
+  checkKeyNeeded();
+}
 </script>
 </body>
 </html>
