@@ -615,17 +615,20 @@ async function fetchChannelHistory(zone) {
   // Hourly summary endpoint — returns averaged readings, ideal for a 24hr line chart
   const end = new Date();
   const start = new Date(end.getTime() - 25 * 3600000); // pad 1 extra hour to ensure full 24hr coverage
+
+  // UbiBot wants "YYYY-MM-DD HH:NN:SS" in UTC, space-separated, no "T"/timezone suffix
   const fmt = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
+
   const url = `https://webapi.ubibot.com/channels/${zone.channelId}/summary.json?account_key=${encodeURIComponent(accountKey)}&start=${encodeURIComponent(fmt(start))}&end=${encodeURIComponent(fmt(end))}&results=30`;
 
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    if (data.result !== 'success' || !data.results_set) return { zone, points: [] };
+    if (data.result !== 'success' || !Array.isArray(data.feeds)) return { zone, points: [] };
 
     // field1 = temperature (Celsius natively, convert to F)
-    const points = data.results_set
+    const points = data.feeds
       .filter(r => r.field1 && r.field1.avg != null)
       .map(r => ({
         t: new Date(r.created_at),
