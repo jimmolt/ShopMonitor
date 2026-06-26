@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shop Environment Monitor — Live</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f12;
+    --panel: #13171e;
+    --border: #1e2530;
+    --accent: #00d4ff;
+    --accent2: #ff6b35;
+    --accent3: #39ff8a;
+    --warn: #ffcc00;
+    --danger: #ff3b3b;
+    --text: #c8d8e8;
+    --dim: #4a5a6a;
+    --mono: 'Share Tech Mono', monospace;
+    --sans: 'Barlow Condensed', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.08) 2px, rgba(0,0,0,0.08) 4px);
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .logo {
+    font-weight: 900;
+    font-size: 22px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--accent);
+    text-shadow: 0 0 18px rgba(0,212,255,0.5);
+  }
+  .logo span { color: var(--text); }
+
+  .header-center {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--dim);
+    text-align: center;
+    letter-spacing: 1px;
+  }
+
+  .live-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent3);
+    margin-right: 6px;
+    animation: pulse 2s infinite;
+    box-shadow: 0 0 8px var(--accent3);
+  }
+  .live-dot.err { background: var(--danger); box-shadow: 0 0 8px var(--danger); animation: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.8); }
+  }
+
+  .status-bar {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--dim);
+  }
+  .status-ok { color: var(--accent3); }
+  .status-warn { color: var(--warn); }
+
+  /* Setup banner */
+  .setup-banner {
+    margin: 16px 28px 0;
+    padding: 14px 18px;
+    background: rgba(255,204,0,0.08);
+    border: 1px solid rgba(255,204,0,0.3);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--warn);
+    line-height: 1.6;
+    display: none;
+  }
+  .setup-banner.show { display: block; }
+  .setup-banner code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 2px; }
+
+  .config-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+  .config-row input {
+    background: #0a0c0f;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 8px 10px;
+    border-radius: 3px;
+    flex: 1;
+    min-width: 200px;
+  }
+  .config-row button {
+    background: var(--accent);
+    color: #0a0c0f;
+    border: none;
+    font-family: var(--sans);
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-size: 12px;
+    padding: 8px 18px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .config-row button:hover { background: #33dfff; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: auto auto;
+    gap: 14px;
+    padding: 20px 28px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s;
+    animation: fadeUp 0.4s ease both;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--card-accent, var(--accent));
+    box-shadow: 0 0 12px var(--card-accent, var(--accent));
+  }
+  .card:hover { border-color: var(--card-accent, var(--accent)); }
+
+  .card.overtemp {
+    border-color: var(--danger);
+    animation: flashRed 1s infinite;
+  }
+  @keyframes flashRed {
+    0%, 100% { background: var(--panel); box-shadow: 0 0 0 rgba(255,59,59,0); }
+    50% { background: rgba(255,59,59,0.18); box-shadow: 0 0 24px rgba(255,59,59,0.5); }
+  }
+
+  .card-label {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--dim);
+    font-family: var(--mono);
+    margin-bottom: 4px;
+  }
+  .card-location {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text);
+    margin-bottom: 16px;
+  }
+
+  .metric-row { display: flex; align-items: baseline; gap: 6px; margin-bottom: 6px; }
+  .metric-value {
+    font-family: var(--mono);
+    font-size: 42px;
+    line-height: 1;
+    color: var(--card-accent, var(--accent));
+    text-shadow: 0 0 20px var(--card-accent, var(--accent));
+    letter-spacing: -2px;
+  }
+  .metric-unit { font-family: var(--mono); font-size: 14px; color: var(--dim); align-self: flex-start; margin-top: 6px; }
+
+  .metric-sub { display: flex; gap: 16px; margin-top: 10px; flex-wrap: wrap; }
+  .sub-item { display: flex; flex-direction: column; gap: 2px; }
+  .sub-label { font-family: var(--mono); font-size: 9px; color: var(--dim); letter-spacing: 1px; text-transform: uppercase; }
+  .sub-value { font-family: var(--mono); font-size: 16px; color: var(--text); }
+
+  .alert-badge {
+    position: absolute;
+    top: 14px; right: 14px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 1px;
+    padding: 3px 8px;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+  .badge-ok { background: rgba(57,255,138,0.12); color: var(--accent3); border: 1px solid rgba(57,255,138,0.3); }
+  .badge-warn { background: rgba(255,204,0,0.12); color: var(--warn); border: 1px solid rgba(255,204,0,0.3); animation: blink 1.5s infinite; }
+  .badge-hi { background: rgba(255,59,59,0.12); color: var(--danger); border: 1px solid rgba(255,59,59,0.3); animation: blink 1s infinite; }
+  .badge-stale { background: rgba(74,90,106,0.2); color: var(--dim); border: 1px solid var(--border); }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  .sensor-id {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--dim);
+    margin-top: 16px;
+    letter-spacing: 1px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .wifi-icon { color: var(--accent3); }
+  .wifi-icon.off { color: var(--danger); }
+
+  /* Per-card 24hr history chart */
+  .card-chart-wrap {
+    margin-top: 14px;
+  }
+  .card-chart-label {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--dim);
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+  }
+  canvas.card-chart { width: 100%; height: 70px; display: block; }
+  .card-chart-wrap .loading-text { font-size: 10px; padding: 22px 0; text-align: center; }
+
+  /* Combined all-zones history chart */
+  .chart-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+    margin: 0 28px 20px;
+    max-width: 1600px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .chart-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #00d4ff, #ff6b35, #39ff8a, #b06cff);
+  }
+  .chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .chart-title {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--dim);
+    font-family: var(--mono);
+  }
+  .chart-name {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+  .chart-legend {
+    display: flex;
+    gap: 16px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--dim);
+    flex-wrap: wrap;
+  }
+  .legend-dot {
+    display: inline-block;
+    width: 8px; height: 2px;
+    margin-right: 4px;
+    vertical-align: middle;
+    border-radius: 1px;
+  }
+  canvas.mainchart { width: 100%; height: 220px; display: block; }
+  .chart-card .loading-text { padding: 60px 0; text-align: center; }
+
+  footer {
+    padding: 10px 28px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--dim);
+    background: var(--panel);
+    letter-spacing: 1px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+  .card:nth-child(1) { animation-delay: 0.05s; }
+  .card:nth-child(2) { animation-delay: 0.1s; }
+  .card:nth-child(3) { animation-delay: 0.15s; }
+  .card:nth-child(4) { animation-delay: 0.2s; }
+
+  .loading-text { font-family: var(--mono); font-size: 13px; color: var(--dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">SHOP<span>MONITOR</span></div>
+  <div class="header-center">
+    <div><span class="live-dot" id="liveDot"></span><span id="liveStatusText">CONNECTING...</span></div>
+    <div style="margin-top:3px;" id="clock">--:--:-- --</div>
+  </div>
+  <div class="status-bar">
+    <span id="onlineCount" class="status-ok">-- / 4 ONLINE</span>
+    <span>UbiBot GS1</span>
+  </div>
+</header>
+
+<!-- Shown until account key is entered -->
+<div class="setup-banner" id="setupBanner">
+  ⚠ ACCOUNT KEY NOT SET — Enter your UbiBot Account Key below (Console → Account → Security). It's saved only in this browser's local storage on this device — never sent anywhere except UbiBot's API, and never included in the page's code or GitHub repo.
+  <div class="config-row">
+    <input type="password" id="accountKeyInput" placeholder="Paste your UbiBot Account Key here">
+    <button onclick="setAccountKey()">CONNECT &amp; REMEMBER</button>
+    <button onclick="forgetAccountKey()" style="background:#2a2f3a; color:var(--text);">FORGET KEY</button>
+  </div>
+</div>
+
+<div class="grid" id="zoneGrid">
+  <!-- Cards injected by JS -->
+</div>
+
+<div class="chart-card">
+  <div class="chart-header">
+    <div>
+      <div class="chart-title">24-Hour History</div>
+      <div class="chart-name">Temperature Overview — All Zones</div>
+    </div>
+    <div class="chart-legend" id="chartLegend"></div>
+  </div>
+  <canvas class="mainchart" id="mainChart"></canvas>
+  <div class="loading-text" id="chartLoading" style="display:none;">Loading 24-hour history...</div>
+</div>
+
+<footer>
+  <div>SHOPMONITOR LIVE · UbiBot GS1 Network · Refresh: 60s</div>
+  <div id="footerAlerts" class="loading-text">Waiting for data...</div>
+  <div id="lastUpdate">LAST UPDATE: --:--:--</div>
+</footer>
+
+<script>
+/* ============================================================
+   CONFIG — your 4 zones, mapped to their UbiBot Channel IDs
+   ============================================================ */
+const ZONES = [
+  { channelId: '131932', name: 'Plasma Table',      accent: '#39ff8a' },
+  { channelId: '131934', name: 'West Long Stall',   accent: '#00d4ff' },
+  { channelId: '131937', name: 'Front Office',      accent: '#ff6b35' },
+  { channelId: '131938', name: 'East Stall',        accent: '#b06cff' },
+];
+
+const REFRESH_MS = 60000; // 60 seconds — matches UbiBot's typical reporting interval
+const STALE_MINUTES = 15; // flag a sensor as stale if no update in this many minutes
+
+let accountKey = '';
+let pollTimer = null;
+const STORAGE_KEY = 'ubibot_account_key';
+
+/* ============================================================
+   Account key handling — persisted in this browser's localStorage
+   only. Never written into the page's source, never committed to
+   the repo, never sent anywhere except UbiBot's own API endpoint.
+   ============================================================ */
+function setAccountKey() {
+  const val = document.getElementById('accountKeyInput').value.trim();
+  if (!val) return;
+  accountKey = val;
+  try {
+    localStorage.setItem(STORAGE_KEY, val);
+  } catch (e) {
+    console.warn('Could not persist key to localStorage:', e);
+  }
+  document.getElementById('setupBanner').classList.remove('show');
+  startPolling();
+}
+
+function forgetAccountKey() {
+  accountKey = '';
+  try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  document.getElementById('accountKeyInput').value = '';
+  if (pollTimer) clearInterval(pollTimer);
+  document.getElementById('setupBanner').classList.add('show');
+  document.getElementById('liveStatusText').textContent = 'KEY CLEARED';
+}
+
+function loadStoredKey() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) accountKey = stored;
+  } catch (e) {
+    console.warn('Could not read localStorage:', e);
+  }
+}
+
+function checkKeyNeeded() {
+  if (!accountKey) {
+    document.getElementById('setupBanner').classList.add('show');
+    document.getElementById('liveStatusText').textContent = 'WAITING FOR ACCOUNT KEY';
+    return true;
+  }
+  return false;
+}
+
+/* ============================================================
+   Build the zone cards (skeleton first, fill with data after)
+   ============================================================ */
+function buildCards() {
+  const grid = document.getElementById('zoneGrid');
+  grid.innerHTML = '';
+  ZONES.forEach((zone, i) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.setProperty('--card-accent', zone.accent);
+    card.id = 'card-' + i;
+    card.innerHTML = `
+      <div class="card-label">Zone ${String(i + 1).padStart(2, '0')}</div>
+      <div class="card-location">${zone.name}</div>
+      <div class="metric-row">
+        <div class="metric-value" id="temp-${i}">--</div>
+        <div class="metric-unit">°F</div>
+      </div>
+      <div class="metric-sub">
+        <div class="sub-item">
+          <div class="sub-label">Humidity</div>
+          <div class="sub-value" id="hum-${i}">--%</div>
+        </div>
+        <div class="sub-item">
+          <div class="sub-label">WiFi RSSI</div>
+          <div class="sub-value" id="rssi-${i}">--</div>
+        </div>
+        <div class="sub-item">
+          <div class="sub-label">Last Reading</div>
+          <div class="sub-value" id="time-${i}">--</div>
+        </div>
+      </div>
+      <div class="sensor-id">
+        <span>Channel ${zone.channelId}</span>
+        <span class="wifi-icon" id="wifi-${i}">▲ WiFi</span>
+      </div>
+      <div class="card-chart-wrap">
+        <div class="card-chart-label">24-HR TEMP HISTORY</div>
+        <canvas class="card-chart" id="chart-${i}"></canvas>
+        <div class="loading-text" id="chart-loading-${i}" style="display:none;">Loading...</div>
+      </div>
+      <div class="alert-badge badge-stale" id="badge-${i}">--</div>
+    `;
+    grid.appendChild(card);
+  });
+}
+
+/* ============================================================
+   Fetch + parse one channel
+   ============================================================ */
+async function fetchChannel(zone, idx) {
+  const url = `https://webapi.ubibot.com/channels/${zone.channelId}?account_key=${encodeURIComponent(accountKey)}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data.result !== 'success' || !data.channel) throw new Error('Bad response shape');
+
+    const ch = data.channel;
+    const lastValues = typeof ch.last_values === 'string' ? JSON.parse(ch.last_values) : ch.last_values;
+
+    // GS1 field mapping: field1 = temperature, field2 = humidity, field5 = WiFi RSSI (typical UbiBot layout)
+    const temp = lastValues.field1 ? lastValues.field1.value : null;
+    const hum = lastValues.field2 ? lastValues.field2.value : null;
+    const rssi = lastValues.field5 ? lastValues.field5.value : null;
+    const lastTime = lastValues.field1 ? lastValues.field1.created_at : null;
+
+    renderZone(idx, { temp, hum, rssi, lastTime, ok: true });
+  } catch (err) {
+    console.error('Error fetching channel', zone.channelId, err);
+    renderZone(idx, { ok: false, error: err.message });
+  }
+}
+
+/* ============================================================
+   Render one zone's values into its card
+   ============================================================ */
+const OVERTEMP_F = 100; // flash the card red above this temperature
+
+function renderZone(idx, d) {
+  const card = document.getElementById('card-' + idx);
+  const tempEl = document.getElementById('temp-' + idx);
+  const humEl = document.getElementById('hum-' + idx);
+  const rssiEl = document.getElementById('rssi-' + idx);
+  const timeEl = document.getElementById('time-' + idx);
+  const badgeEl = document.getElementById('badge-' + idx);
+  const wifiEl = document.getElementById('wifi-' + idx);
+
+  if (!d.ok) {
+    tempEl.textContent = 'ERR';
+    humEl.textContent = '--%';
+    rssiEl.textContent = '--';
+    timeEl.textContent = '--';
+    badgeEl.textContent = 'OFFLINE';
+    badgeEl.className = 'alert-badge badge-hi';
+    wifiEl.textContent = '▼ NO LINK';
+    wifiEl.classList.add('off');
+    card.classList.remove('overtemp'); // no reliable reading — don't flash on stale data
+    return;
+  }
+
+  // UbiBot reports Celsius natively — convert to °F
+  const tempF = d.temp != null ? (d.temp * 9 / 5 + 32) : null;
+
+  tempEl.textContent = tempF != null ? Math.round(tempF * 10) / 10 : '--';
+  humEl.textContent = d.hum != null ? Math.round(d.hum) + '%' : '--%';
+  rssiEl.textContent = d.rssi != null ? d.rssi + ' dBm' : '--';
+
+  let isStale = false;
+  if (d.lastTime) {
+    const ageMin = (Date.now() - new Date(d.lastTime).getTime()) / 60000;
+    isStale = ageMin > STALE_MINUTES;
+    timeEl.textContent = ageMin < 1 ? 'just now' : Math.round(ageMin) + ' min ago';
+  } else {
+    timeEl.textContent = '--';
+  }
+
+  wifiEl.textContent = '▲ WiFi';
+  wifiEl.classList.remove('off');
+
+  const isOvertemp = tempF != null && tempF > OVERTEMP_F && !isStale;
+  card.classList.toggle('overtemp', isOvertemp);
+
+  if (isOvertemp) {
+    badgeEl.textContent = 'OVER TEMP';
+    badgeEl.className = 'alert-badge badge-hi';
+  } else if (isStale) {
+    badgeEl.textContent = 'STALE';
+    badgeEl.className = 'alert-badge badge-stale';
+  } else {
+    badgeEl.textContent = 'NORMAL';
+    badgeEl.className = 'alert-badge badge-ok';
+  }
+}
+
+/* ============================================================
+   Poll all zones
+   ============================================================ */
+async function pollAll() {
+  if (checkKeyNeeded()) return;
+
+  document.getElementById('liveStatusText').textContent = 'REFRESHING...';
+  const results = await Promise.allSettled(ZONES.map((z, i) => fetchChannel(z, i)));
+
+  const onlineBadges = document.querySelectorAll('.badge-ok, .badge-stale').length;
+  const errBadges = document.querySelectorAll('.badge-hi').length;
+  const total = ZONES.length;
+  const online = total - errBadges;
+
+  document.getElementById('onlineCount').textContent = `${online} / ${total} ONLINE`;
+  document.getElementById('onlineCount').className = errBadges > 0 ? 'status-warn' : 'status-ok';
+
+  const dot = document.getElementById('liveDot');
+  if (errBadges > 0) {
+    dot.classList.add('err');
+    document.getElementById('liveStatusText').textContent = errBadges + ' ZONE(S) UNREACHABLE';
+  } else {
+    dot.classList.remove('err');
+    document.getElementById('liveStatusText').textContent = 'LIVE FEED — ALL SENSORS ONLINE';
+  }
+
+  document.getElementById('lastUpdate').textContent = 'LAST UPDATE: ' + new Date().toLocaleTimeString('en-US');
+
+  const staleCount = document.querySelectorAll('.badge-stale').length;
+  let footerMsg = `${online}/${total} zones reporting`;
+  if (errBadges > 0) footerMsg += ` · ${errBadges} unreachable`;
+  if (staleCount > 0) footerMsg += ` · ${staleCount} stale (no update in ${STALE_MINUTES}+ min)`;
+  document.getElementById('footerAlerts').textContent = footerMsg;
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollAll();
+  pollTimer = setInterval(pollAll, REFRESH_MS);
+  fetchHistoryAndDraw();
+  if (historyTimer) clearInterval(historyTimer);
+  historyTimer = setInterval(fetchHistoryAndDraw, HISTORY_REFRESH_MS);
+}
+
+/* ============================================================
+   24-hour history charts — per-zone card charts + one combined
+   all-zones chart at the bottom (same fetched data, drawn twice)
+   ============================================================ */
+let historyTimer = null;
+let lastHistoryData = {}; // keyed by zone index
+const HISTORY_REFRESH_MS = 5 * 60000; // refresh history every 5 minutes — hourly data doesn't need 60s polling
+
+function buildChartLegend() {
+  const legend = document.getElementById('chartLegend');
+  legend.innerHTML = ZONES.map(z =>
+    `<span><span class="legend-dot" style="background:${z.accent};"></span>${z.name}</span>`
+  ).join('');
+}
+
+async function fetchChannelHistory(zone) {
+  // Hourly summary endpoint — returns averaged readings, ideal for a 24hr line chart
+  const end = new Date();
+  const start = new Date(end.getTime() - 25 * 3600000); // pad 1 extra hour to ensure full 24hr coverage
+
+  // UbiBot wants "YYYY-MM-DD HH:NN:SS" in UTC, space-separated, no "T"/timezone suffix
+  const fmt = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
+
+  const url = `https://webapi.ubibot.com/channels/${zone.channelId}/summary.json?account_key=${encodeURIComponent(accountKey)}&start=${encodeURIComponent(fmt(start))}&end=${encodeURIComponent(fmt(end))}&results=30`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data.result !== 'success' || !Array.isArray(data.feeds)) return { zone, points: [] };
+
+    // field1 = temperature (Celsius natively, convert to F)
+    const points = data.feeds
+      .filter(r => r.field1 && r.field1.avg != null)
+      .map(r => ({
+        t: new Date(r.created_at),
+        v: r.field1.avg * 9 / 5 + 32
+      }));
+    return { zone, points };
+  } catch (err) {
+    console.error('History fetch failed for', zone.channelId, err);
+    return { zone, points: [] };
+  }
+}
+
+async function fetchHistoryAndDraw() {
+  if (!accountKey) return;
+
+  ZONES.forEach((_, i) => {
+    const loadingEl = document.getElementById('chart-loading-' + i);
+    const canvas = document.getElementById('chart-' + i);
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (canvas) canvas.style.display = 'none';
+  });
+  const mainLoadingEl = document.getElementById('chartLoading');
+  const mainCanvas = document.getElementById('mainChart');
+  mainLoadingEl.style.display = 'block';
+  mainCanvas.style.display = 'none';
+
+  const allResults = await Promise.all(ZONES.map(fetchChannelHistory));
+
+  allResults.forEach((result, i) => {
+    lastHistoryData[i] = result;
+    const loadingEl = document.getElementById('chart-loading-' + i);
+    const canvas = document.getElementById('chart-' + i);
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (canvas) canvas.style.display = 'block';
+    drawCardChart(i, result);
+  });
+
+  mainLoadingEl.style.display = 'none';
+  mainCanvas.style.display = 'block';
+  drawMainChart(allResults);
+}
+
+function drawCardChart(idx, result) {
+  const canvas = document.getElementById('chart-' + idx);
+  if (!canvas) return;
+  const { zone, points } = result;
+
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const h = 70;
+  canvas.width = rect.width * dpr;
+  canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, rect.width, h);
+
+  const w = rect.width;
+
+  if (!points || points.length === 0) {
+    ctx.fillStyle = '#4a5a6a';
+    ctx.font = "10px 'Share Tech Mono'";
+    ctx.textAlign = 'center';
+    ctx.fillText('No history data yet', w / 2, h / 2);
+    return;
+  }
+
+  const padL = 28, padR = 6, padT = 6, padB = 14;
+  const cw = w - padL - padR, ch = h - padT - padB;
+
+  const vals = points.map(p => p.v);
+  const min = Math.min(...vals) - 2;
+  const max = Math.max(...vals) + 2;
+
+  const now = Date.now();
+  const windowStart = now - 24 * 3600000;
+  const xPos = (t) => padL + ((t - windowStart) / (24 * 3600000)) * cw;
+  const yPos = (v) => padT + (1 - (v - min) / (max - min)) * ch;
+
+  // Grid lines + temp labels (min/max only, keeps it readable at small size)
+  ctx.strokeStyle = '#1e2530';
+  ctx.lineWidth = 1;
+  [0, 1].forEach(i => {
+    const y = padT + i * ch;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(w - padR, y);
+    ctx.stroke();
+    const val = Math.round(i === 0 ? max : min);
+    ctx.fillStyle = '#4a5a6a';
+    ctx.font = "8px 'Share Tech Mono'";
+    ctx.textAlign = 'right';
+    ctx.fillText(val + '°', padL - 4, y + 3);
+  });
+
+  // Hour labels
+  ctx.fillStyle = '#4a5a6a';
+  ctx.textAlign = 'center';
+  ctx.font = "8px 'Share Tech Mono'";
+  [0, 6, 12, 18, 24].forEach(hr => {
+    const t = windowStart + (hr / 24) * 24 * 3600000;
+    const x = padL + (hr / 24) * cw;
+    const label = hr === 24 ? 'NOW' : new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+    ctx.fillText(label, x, h - 3);
+  });
+
+  // Line + fill
+  const sorted = [...points].sort((a, b) => a.t - b.t);
+  const pts = sorted.map(p => ({ x: xPos(p.t.getTime()), y: yPos(p.v) }));
+
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, padT + ch);
+  pts.forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.lineTo(pts[pts.length - 1].x, padT + ch);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, padT, 0, padT + ch);
+  grad.addColorStop(0, zone.accent + '33');
+  grad.addColorStop(1, zone.accent + '00');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  pts.forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.strokeStyle = zone.accent;
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = zone.accent;
+  ctx.shadowBlur = 6;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Dot on last point
+  const last = pts[pts.length - 1];
+  ctx.beginPath();
+  ctx.arc(last.x, last.y, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = zone.accent;
+  ctx.shadowColor = zone.accent;
+  ctx.shadowBlur = 8;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+}
+
+function drawMainChart(datasets) {
+  const canvas = document.getElementById('mainChart');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const h = 220;
+  canvas.width = rect.width * dpr;
+  canvas.height = h * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, rect.width, h);
+
+  const w = rect.width;
+  const padL = 38, padR = 12, padT = 10, padB = 26;
+  const cw = w - padL - padR, ch = h - padT - padB;
+
+  const allPoints = datasets.flatMap(d => d.points);
+  if (allPoints.length === 0) {
+    ctx.fillStyle = '#4a5a6a';
+    ctx.font = "13px 'Share Tech Mono'";
+    ctx.textAlign = 'center';
+    ctx.fillText('No history data available yet', w / 2, h / 2);
+    return;
+  }
+
+  const vals = allPoints.map(p => p.v);
+  const min = Math.min(...vals) - 3;
+  const max = Math.max(...vals) + 3;
+
+  const now = Date.now();
+  const windowStart = now - 24 * 3600000;
+  const xPos = (t) => padL + ((t - windowStart) / (24 * 3600000)) * cw;
+  const yPos = (v) => padT + (1 - (v - min) / (max - min)) * ch;
+
+  // Grid lines + temp labels
+  ctx.strokeStyle = '#1e2530';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (i / 4) * ch;
+    ctx.beginPath();
+    ctx.moveTo(padL, y);
+    ctx.lineTo(w - padR, y);
+    ctx.stroke();
+    const val = Math.round(max - (i / 4) * (max - min));
+    ctx.fillStyle = '#4a5a6a';
+    ctx.font = "9px 'Share Tech Mono'";
+    ctx.textAlign = 'right';
+    ctx.fillText(val + '°', padL - 4, y + 3);
+  }
+
+  // Hour labels along x-axis
+  ctx.fillStyle = '#4a5a6a';
+  ctx.textAlign = 'center';
+  ctx.font = "9px 'Share Tech Mono'";
+  for (let i = 0; i <= 12; i++) {
+    const t = windowStart + (i / 12) * 24 * 3600000;
+    const x = padL + (i / 12) * cw;
+    const d = new Date(t);
+    const label = i === 12 ? 'NOW' : d.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+    ctx.fillText(label, x, h - 6);
+  }
+
+  // Draw each zone's line
+  datasets.forEach(({ zone, points }) => {
+    if (points.length === 0) return;
+    const sorted = [...points].sort((a, b) => a.t - b.t);
+    ctx.beginPath();
+    let started = false;
+    sorted.forEach(p => {
+      const x = xPos(p.t.getTime());
+      const y = yPos(p.v);
+      if (!started) { ctx.moveTo(x, y); started = true; }
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = zone.accent;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = zone.accent;
+    ctx.shadowBlur = 8;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Dot on last point
+    const last = sorted[sorted.length - 1];
+    const lx = xPos(last.t.getTime());
+    const ly = yPos(last.v);
+    ctx.beginPath();
+    ctx.arc(lx, ly, 3, 0, Math.PI * 2);
+    ctx.fillStyle = zone.accent;
+    ctx.shadowColor = zone.accent;
+    ctx.shadowBlur = 10;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+}
+
+window.addEventListener('resize', () => {
+  Object.entries(lastHistoryData).forEach(([i, result]) => drawCardChart(Number(i), result));
+  const mainResults = Object.values(lastHistoryData);
+  if (mainResults.length) drawMainChart(mainResults);
+});
+
+/* ============================================================
+   Clock
+   ============================================================ */
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toLocaleTimeString('en-US', {hour12: true}) + ' — ' + now.toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+/* ============================================================
+   Init
+   ============================================================ */
+buildCards();
+buildChartLegend();
+loadStoredKey();
+if (accountKey) {
+  startPolling();
+} else {
+  checkKeyNeeded();
+}
+</script>
+</body>
+</html>
