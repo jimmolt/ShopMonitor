@@ -177,6 +177,15 @@
   }
   .card:hover { border-color: var(--card-accent, var(--accent)); }
 
+  .card.overtemp {
+    border-color: var(--danger);
+    animation: flashRed 1s infinite;
+  }
+  @keyframes flashRed {
+    0%, 100% { background: var(--panel); box-shadow: 0 0 0 rgba(255,59,59,0); }
+    50% { background: rgba(255,59,59,0.18); box-shadow: 0 0 24px rgba(255,59,59,0.5); }
+  }
+
   .card-label {
     font-size: 10px;
     letter-spacing: 3px;
@@ -240,65 +249,19 @@
   .wifi-icon { color: var(--accent3); }
   .wifi-icon.off { color: var(--danger); }
 
-  /* History chart card */
-  .chart-card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 20px;
-    position: relative;
-    overflow: hidden;
-    margin: 0 28px 20px;
-    max-width: 1600px;
-    margin-left: auto;
-    margin-right: auto;
+  /* Per-card 24hr history chart */
+  .card-chart-wrap {
+    margin-top: 14px;
   }
-  .chart-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, #00d4ff, #ff6b35, #39ff8a, #b06cff);
-  }
-  .chart-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 16px;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-  .chart-title {
-    font-size: 10px;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: var(--dim);
+  .card-chart-label {
     font-family: var(--mono);
-  }
-  .chart-name {
-    font-size: 18px;
-    font-weight: 700;
+    font-size: 9px;
+    color: var(--dim);
     letter-spacing: 1px;
-    text-transform: uppercase;
-    margin-top: 2px;
+    margin-bottom: 4px;
   }
-  .chart-legend {
-    display: flex;
-    gap: 16px;
-    font-family: var(--mono);
-    font-size: 10px;
-    color: var(--dim);
-    flex-wrap: wrap;
-  }
-  .legend-dot {
-    display: inline-block;
-    width: 8px; height: 2px;
-    margin-right: 4px;
-    vertical-align: middle;
-    border-radius: 1px;
-  }
-  canvas.mainchart { width: 100%; height: 220px; display: block; }
-  .chart-card .loading-text { padding: 60px 0; text-align: center; }
+  canvas.card-chart { width: 100%; height: 70px; display: block; }
+  .card-chart-wrap .loading-text { font-size: 10px; padding: 22px 0; text-align: center; }
 
   footer {
     padding: 10px 28px;
@@ -350,18 +313,6 @@
 
 <div class="grid" id="zoneGrid">
   <!-- Cards injected by JS -->
-</div>
-
-<div class="chart-card">
-  <div class="chart-header">
-    <div>
-      <div class="chart-title">24-Hour History</div>
-      <div class="chart-name">Temperature Overview — All Zones</div>
-    </div>
-    <div class="chart-legend" id="chartLegend"></div>
-  </div>
-  <canvas class="mainchart" id="mainChart"></canvas>
-  <div class="loading-text" id="chartLoading" style="display:none;">Loading 24-hour history...</div>
 </div>
 
 <footer>
@@ -469,6 +420,11 @@ function buildCards() {
         <span>Channel ${zone.channelId}</span>
         <span class="wifi-icon" id="wifi-${i}">▲ WiFi</span>
       </div>
+      <div class="card-chart-wrap">
+        <div class="card-chart-label">24-HR TEMP HISTORY</div>
+        <canvas class="card-chart" id="chart-${i}"></canvas>
+        <div class="loading-text" id="chart-loading-${i}" style="display:none;">Loading...</div>
+      </div>
       <div class="alert-badge badge-stale" id="badge-${i}">--</div>
     `;
     grid.appendChild(card);
@@ -505,7 +461,10 @@ async function fetchChannel(zone, idx) {
 /* ============================================================
    Render one zone's values into its card
    ============================================================ */
+const OVERTEMP_F = 100; // flash the card red above this temperature
+
 function renderZone(idx, d) {
+  const card = document.getElementById('card-' + idx);
   const tempEl = document.getElementById('temp-' + idx);
   const humEl = document.getElementById('hum-' + idx);
   const rssiEl = document.getElementById('rssi-' + idx);
@@ -522,6 +481,7 @@ function renderZone(idx, d) {
     badgeEl.className = 'alert-badge badge-hi';
     wifiEl.textContent = '▼ NO LINK';
     wifiEl.classList.add('off');
+    card.classList.remove('overtemp'); // no reliable reading — don't flash on stale data
     return;
   }
 
@@ -544,7 +504,13 @@ function renderZone(idx, d) {
   wifiEl.textContent = '▲ WiFi';
   wifiEl.classList.remove('off');
 
-  if (isStale) {
+  const isOvertemp = tempF != null && tempF > OVERTEMP_F && !isStale;
+  card.classList.toggle('overtemp', isOvertemp);
+
+  if (isOvertemp) {
+    badgeEl.textContent = 'OVER TEMP';
+    badgeEl.className = 'alert-badge badge-hi';
+  } else if (isStale) {
     badgeEl.textContent = 'STALE';
     badgeEl.className = 'alert-badge badge-stale';
   } else {
@@ -598,18 +564,11 @@ function startPolling() {
 }
 
 /* ============================================================
-   24-hour history chart
+   24-hour history charts — one per zone card
    ============================================================ */
 let historyTimer = null;
-let lastHistoryData = null;
+let lastHistoryData = {}; // keyed by zone index
 const HISTORY_REFRESH_MS = 5 * 60000; // refresh history every 5 minutes — hourly data doesn't need 60s polling
-
-function buildChartLegend() {
-  const legend = document.getElementById('chartLegend');
-  legend.innerHTML = ZONES.map(z =>
-    `<span><span class="legend-dot" style="background:${z.accent};"></span>${z.name}</span>`
-  ).join('');
-}
 
 async function fetchChannelHistory(zone) {
   // Hourly summary endpoint — returns averaged readings, ideal for a 24hr line chart
@@ -643,24 +602,34 @@ async function fetchChannelHistory(zone) {
 
 async function fetchHistoryAndDraw() {
   if (!accountKey) return;
-  const loadingEl = document.getElementById('chartLoading');
-  const canvas = document.getElementById('mainChart');
-  loadingEl.style.display = 'block';
-  canvas.style.display = 'none';
+
+  ZONES.forEach((_, i) => {
+    const loadingEl = document.getElementById('chart-loading-' + i);
+    const canvas = document.getElementById('chart-' + i);
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (canvas) canvas.style.display = 'none';
+  });
 
   const allResults = await Promise.all(ZONES.map(fetchChannelHistory));
-  lastHistoryData = allResults;
 
-  loadingEl.style.display = 'none';
-  canvas.style.display = 'block';
-  drawMainChart(allResults);
+  allResults.forEach((result, i) => {
+    lastHistoryData[i] = result;
+    const loadingEl = document.getElementById('chart-loading-' + i);
+    const canvas = document.getElementById('chart-' + i);
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (canvas) canvas.style.display = 'block';
+    drawCardChart(i, result);
+  });
 }
 
-function drawMainChart(datasets) {
-  const canvas = document.getElementById('mainChart');
+function drawCardChart(idx, result) {
+  const canvas = document.getElementById('chart-' + idx);
+  if (!canvas) return;
+  const { zone, points } = result;
+
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
-  const h = 220;
+  const h = 70;
   canvas.width = rect.width * dpr;
   canvas.height = h * dpr;
   const ctx = canvas.getContext('2d');
@@ -668,90 +637,92 @@ function drawMainChart(datasets) {
   ctx.clearRect(0, 0, rect.width, h);
 
   const w = rect.width;
-  const padL = 38, padR = 12, padT = 10, padB = 26;
-  const cw = w - padL - padR, ch = h - padT - padB;
 
-  const allPoints = datasets.flatMap(d => d.points);
-  if (allPoints.length === 0) {
+  if (!points || points.length === 0) {
     ctx.fillStyle = '#4a5a6a';
-    ctx.font = "13px 'Share Tech Mono'";
+    ctx.font = "10px 'Share Tech Mono'";
     ctx.textAlign = 'center';
-    ctx.fillText('No history data available yet', w / 2, h / 2);
+    ctx.fillText('No history data yet', w / 2, h / 2);
     return;
   }
 
-  const vals = allPoints.map(p => p.v);
-  const min = Math.min(...vals) - 3;
-  const max = Math.max(...vals) + 3;
+  const padL = 28, padR = 6, padT = 6, padB = 14;
+  const cw = w - padL - padR, ch = h - padT - padB;
+
+  const vals = points.map(p => p.v);
+  const min = Math.min(...vals) - 2;
+  const max = Math.max(...vals) + 2;
 
   const now = Date.now();
   const windowStart = now - 24 * 3600000;
   const xPos = (t) => padL + ((t - windowStart) / (24 * 3600000)) * cw;
   const yPos = (v) => padT + (1 - (v - min) / (max - min)) * ch;
 
-  // Grid lines + temp labels
+  // Grid lines + temp labels (min/max only, keeps it readable at small size)
   ctx.strokeStyle = '#1e2530';
   ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = padT + (i / 4) * ch;
+  [0, 1].forEach(i => {
+    const y = padT + i * ch;
     ctx.beginPath();
     ctx.moveTo(padL, y);
     ctx.lineTo(w - padR, y);
     ctx.stroke();
-    const val = Math.round(max - (i / 4) * (max - min));
+    const val = Math.round(i === 0 ? max : min);
     ctx.fillStyle = '#4a5a6a';
-    ctx.font = "9px 'Share Tech Mono'";
+    ctx.font = "8px 'Share Tech Mono'";
     ctx.textAlign = 'right';
     ctx.fillText(val + '°', padL - 4, y + 3);
-  }
+  });
 
-  // Hour labels along x-axis
+  // Hour labels
   ctx.fillStyle = '#4a5a6a';
   ctx.textAlign = 'center';
-  ctx.font = "9px 'Share Tech Mono'";
-  for (let i = 0; i <= 12; i++) {
-    const t = windowStart + (i / 12) * 24 * 3600000;
-    const x = padL + (i / 12) * cw;
-    const d = new Date(t);
-    const label = i === 12 ? 'NOW' : d.toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
-    ctx.fillText(label, x, h - 6);
-  }
-
-  // Draw each zone's line
-  datasets.forEach(({ zone, points }) => {
-    if (points.length === 0) return;
-    const sorted = [...points].sort((a, b) => a.t - b.t);
-    ctx.beginPath();
-    let started = false;
-    sorted.forEach(p => {
-      const x = xPos(p.t.getTime());
-      const y = yPos(p.v);
-      if (!started) { ctx.moveTo(x, y); started = true; }
-      else ctx.lineTo(x, y);
-    });
-    ctx.strokeStyle = zone.accent;
-    ctx.lineWidth = 2;
-    ctx.shadowColor = zone.accent;
-    ctx.shadowBlur = 8;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // Dot on last point
-    const last = sorted[sorted.length - 1];
-    const lx = xPos(last.t.getTime());
-    const ly = yPos(last.v);
-    ctx.beginPath();
-    ctx.arc(lx, ly, 3, 0, Math.PI * 2);
-    ctx.fillStyle = zone.accent;
-    ctx.shadowColor = zone.accent;
-    ctx.shadowBlur = 10;
-    ctx.fill();
-    ctx.shadowBlur = 0;
+  ctx.font = "8px 'Share Tech Mono'";
+  [0, 6, 12, 18, 24].forEach(hr => {
+    const t = windowStart + (hr / 24) * 24 * 3600000;
+    const x = padL + (hr / 24) * cw;
+    const label = hr === 24 ? 'NOW' : new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true });
+    ctx.fillText(label, x, h - 3);
   });
+
+  // Line + fill
+  const sorted = [...points].sort((a, b) => a.t - b.t);
+  const pts = sorted.map(p => ({ x: xPos(p.t.getTime()), y: yPos(p.v) }));
+
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, padT + ch);
+  pts.forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.lineTo(pts[pts.length - 1].x, padT + ch);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, padT, 0, padT + ch);
+  grad.addColorStop(0, zone.accent + '33');
+  grad.addColorStop(1, zone.accent + '00');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  pts.forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.strokeStyle = zone.accent;
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = zone.accent;
+  ctx.shadowBlur = 6;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Dot on last point
+  const last = pts[pts.length - 1];
+  ctx.beginPath();
+  ctx.arc(last.x, last.y, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = zone.accent;
+  ctx.shadowColor = zone.accent;
+  ctx.shadowBlur = 8;
+  ctx.fill();
+  ctx.shadowBlur = 0;
 }
 
 window.addEventListener('resize', () => {
-  if (lastHistoryData) drawMainChart(lastHistoryData);
+  Object.entries(lastHistoryData).forEach(([i, result]) => drawCardChart(Number(i), result));
 });
 
 /* ============================================================
@@ -768,7 +739,6 @@ setInterval(updateClock, 1000);
    Init
    ============================================================ */
 buildCards();
-buildChartLegend();
 loadStoredKey();
 if (accountKey) {
   startPolling();
